@@ -7,8 +7,12 @@ use kamino_lending::Reserve;
 
 use crate::{
     operations::reserve_whitelist_operations,
-    utils::consts::{CTOKEN_VAULT_SEED, WHITELISTED_RESERVES_SEED},
-    xmsg, KaminoVaultError, ReserveWhitelistEntry, VaultState,
+    utils::consts::{
+        CTOKEN_VAULT_SEED, WHITELISTED_MINTS_SEED, WHITELISTED_PROGRAMS_SEED,
+        WHITELISTED_RESERVES_SEED,
+    },
+    xmsg, KaminoVaultError, MintWhitelistEntry, ProgramWhitelistEntry, ReserveWhitelistEntry,
+    VaultState,
 };
 
 /// Update the allocation of a reserve; vault admin can insert a new reserve or update the allocation of an existing reserve, but the allocation admin can only update the allocation of existing reserves.
@@ -55,6 +59,14 @@ pub fn process(
         allocation_cap,
         ctx.accounts
             .reserve_whitelist_entry
+            .as_ref()
+            .map(|acc| acc.as_ref()),
+        ctx.accounts
+            .program_whitelist_entry
+            .as_ref()
+            .map(|acc| acc.as_ref()),
+        ctx.accounts
+            .mint_whitelist_entry
             .as_ref()
             .map(|acc| acc.as_ref()),
     )?;
@@ -107,6 +119,18 @@ pub struct UpdateReserveAllocation<'info> {
         bump
     )]
     pub reserve_whitelist_entry: Option<Account<'info, ReserveWhitelistEntry>>,
+
+    #[account(
+        seeds = [WHITELISTED_PROGRAMS_SEED, kamino_lending::id().as_ref()],
+        bump
+    )]
+    pub program_whitelist_entry: Option<Account<'info, ProgramWhitelistEntry>>,
+
+    #[account(
+        seeds = [WHITELISTED_MINTS_SEED, vault_state.load()?.token_mint.as_ref()],
+        bump
+    )]
+    pub mint_whitelist_entry: Option<Account<'info, MintWhitelistEntry>>,
 
     pub reserve_collateral_token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,

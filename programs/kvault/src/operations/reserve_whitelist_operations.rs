@@ -1,6 +1,9 @@
 use anchor_lang::prelude::*;
 
-use crate::{KaminoVaultError, ReserveWhitelistEntry, VaultState};
+use crate::{
+    operations::strategy_whitelist_operations, KaminoVaultError, MintWhitelistEntry,
+    ProgramWhitelistEntry, ReserveWhitelistEntry, VaultState,
+};
 
 #[derive(Clone, Copy, Debug, AnchorSerialize, AnchorDeserialize)]
 pub enum UpdateReserveWhitelistMode {
@@ -56,6 +59,8 @@ pub fn check_can_update_allocation_weight(
     target_allocation_weight: u64,
     allocation_cap: u64,
     reserve_whitelist_entry: Option<&ReserveWhitelistEntry>,
+    program_whitelist_entry: Option<&ProgramWhitelistEntry>,
+    mint_whitelist_entry: Option<&MintWhitelistEntry>,
 ) -> Result<()> {
     // Get current allocation weight (0 if reserve is not in allocation)
     let (current_weight, current_cap) = match reserve_idx_in_allocation {
@@ -70,12 +75,17 @@ pub fn check_can_update_allocation_weight(
     if (target_allocation_weight > current_weight || allocation_cap > current_cap)
         && vault.vault_allows_allocations_in_whitelisted_reserves_only()
     {
-        let reserve_whitelist_entry =
-            reserve_whitelist_entry.ok_or(KaminoVaultError::ReserveNotWhitelisted)?;
-        require!(
-            reserve_whitelist_entry.is_add_allocation_whitelisted(),
-            KaminoVaultError::ReserveNotWhitelisted
-        );
+        let reserve_allowed = reserve_whitelist_entry
+            .map(|entry| entry.is_add_allocation_whitelisted())
+            .unwrap_or(false);
+
+        if !reserve_allowed {
+            strategy_whitelist_operations::check_any_whitelist(
+                program_whitelist_entry,
+                mint_whitelist_entry,
+                false,
+            )?;
+        }
     }
 
     Ok(())
