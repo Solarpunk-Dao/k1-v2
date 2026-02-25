@@ -11,6 +11,7 @@ pub mod utils;
 
 use crate::handlers::*;
 pub use crate::operations::reserve_whitelist_operations::UpdateReserveWhitelistMode;
+pub use crate::operations::strategy_whitelist_operations::UpdateStrategyWhitelistMode;
 pub use crate::operations::vault_config_operations::VaultConfigField;
 pub use crate::state::*;
 pub use program_id::KVAULT_PROGRAM_ID;
@@ -156,6 +157,20 @@ pub mod kamino_vault {
         update: UpdateReserveWhitelistMode,
     ) -> Result<()> {
         handler_add_update_whitelisted_reserve::process(ctx, update)
+    }
+
+    pub fn add_update_whitelisted_program(
+        ctx: Context<AddUpdateWhitelistedProgram>,
+        update: UpdateStrategyWhitelistMode,
+    ) -> Result<()> {
+        handler_add_update_whitelisted_program::process(ctx, update)
+    }
+
+    pub fn add_update_whitelisted_mint(
+        ctx: Context<AddUpdateWhitelistedMint>,
+        update: UpdateStrategyWhitelistMode,
+    ) -> Result<()> {
+        handler_add_update_whitelisted_mint::process(ctx, update)
     }
 }
 

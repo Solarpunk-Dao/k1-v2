@@ -578,6 +578,65 @@ static_assertions::const_assert_eq!(
     std::mem::size_of::<ReserveWhitelistEntry>()
 );
 static_assertions::const_assert_eq!(0, std::mem::size_of::<ReserveWhitelistEntry>() % 8);
+
+#[account]
+pub struct ProgramWhitelistEntry {
+    pub program_id: Pubkey,
+    pub whitelist_add_allocation: u8,
+    pub whitelist_invest: u8,
+    pub padding: [u8; 94],
+}
+
+impl ProgramWhitelistEntry {
+    pub fn is_add_allocation_whitelisted(&self) -> bool {
+        self.whitelist_add_allocation == 1
+    }
+
+    pub fn is_invest_whitelisted(&self) -> bool {
+        self.whitelist_invest == 1
+    }
+}
+
+impl Default for ProgramWhitelistEntry {
+    fn default() -> Self {
+        Self {
+            program_id: Pubkey::default(),
+            whitelist_add_allocation: 0,
+            whitelist_invest: 0,
+            padding: [0; 94],
+        }
+    }
+}
+
+#[account]
+pub struct MintWhitelistEntry {
+    pub mint: Pubkey,
+    pub whitelist_add_allocation: u8,
+    pub whitelist_invest: u8,
+    pub padding: [u8; 94],
+}
+
+impl MintWhitelistEntry {
+    pub fn is_add_allocation_whitelisted(&self) -> bool {
+        self.whitelist_add_allocation == 1
+    }
+
+    pub fn is_invest_whitelisted(&self) -> bool {
+        self.whitelist_invest == 1
+    }
+}
+
+impl Default for MintWhitelistEntry {
+    fn default() -> Self {
+        Self {
+            mint: Pubkey::default(),
+            whitelist_add_allocation: 0,
+            whitelist_invest: 0,
+            padding: [0; 94],
+        }
+    }
+}
+
 #[account]
 pub struct ReserveWhitelistEntry {
     /// The token mint is stored to solve the problem of finding all the whitelisted reserves for a particular token mint:

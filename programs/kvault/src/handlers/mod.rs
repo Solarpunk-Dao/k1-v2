@@ -1,3 +1,5 @@
+pub mod handler_add_update_whitelisted_mint;
+pub mod handler_add_update_whitelisted_program;
 pub mod handler_add_update_whitelisted_reserve;
 pub mod handler_deposit;
 pub mod handler_give_up_pending_fees;
@@ -16,6 +18,8 @@ pub mod handler_withdraw;
 pub mod handler_withdraw_pending_fees;
 
 pub use handler_add_update_whitelisted_reserve::*;
+pub use handler_add_update_whitelisted_mint::*;
+pub use handler_add_update_whitelisted_program::*;
 pub use handler_deposit::*;
 pub use handler_give_up_pending_fees::*;
 pub use handler_init_vault::*;
