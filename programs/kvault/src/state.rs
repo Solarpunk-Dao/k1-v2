@@ -124,8 +124,20 @@ pub struct VaultState {
     // todo: should we split this into pending_mgmt_fee and pending_perf_fee?
     pub pending_fees_sf: u128,
 
+    // throttle
+    pub redeemed_in_period: u64,
+    pub period_start_ts: u64,
+
+    // optional external NAV components
+    pub non_klend_reported_value: u64,
+    pub offchain_nav: u64,
+
+    pub deposits_paused: u8,
+    pub withdrawals_paused: u8,
+    pub config_padding_0: [u8; 14],
+
     pub vault_allocation_strategy: [VaultAllocation; MAX_RESERVES],
-    pub padding_1: [u128; 256],
+    pub padding_1: [u128; 252],
 
     // General config
     pub min_deposit_amount: u64,
@@ -135,6 +147,7 @@ pub struct VaultState {
     pub crank_fund_fee_per_reserve: u64,
 
     pub pending_admin: Pubkey,
+    pub fee_recipient: Pubkey,
 
     pub cumulative_earned_interest_sf: u128, // this represents the raw total interest earned by the vault, including the fees
     pub cumulative_mgmt_fees_sf: u128,
@@ -159,7 +172,7 @@ pub struct VaultState {
     pub allow_invest_in_whitelisted_reserves_only: u8,
 
     pub padding_4: [u8; 14],
-    pub padding_3: [u128; 238],
+    pub padding_3: [u128; 236],
 }
 
 impl Default for VaultState {
@@ -227,6 +240,15 @@ impl VaultState {
         self.cumulative_perf_fees_sf = cumulative_perf_fees.to_bits();
     }
 
+
+    pub fn deposits_are_paused(&self) -> bool {
+        self.deposits_paused == 1
+    }
+
+    pub fn withdrawals_are_paused(&self) -> bool {
+        self.withdrawals_paused == 1
+    }
+
     pub fn vault_allows_allocations_in_whitelisted_reserves_only(&self) -> bool {
         self.allow_allocations_in_whitelisted_reserves_only == 1
     }
@@ -236,14 +258,23 @@ impl VaultState {
     }
 
     pub fn compute_aum(&self, invested_total: &Fraction) -> Result<Fraction> {
+        let gross_assets = self.compute_total_assets(invested_total)?;
+
         // if the vault only has pending fees, it should not be possible to withdraw
         let pending_fees = self.get_pending_fees();
 
-        if Fraction::from(self.token_available) + invested_total < pending_fees {
+        if gross_assets < pending_fees {
             return err!(KaminoVaultError::AUMBelowPendingFees);
         }
 
-        Ok(Fraction::from(self.token_available) + invested_total - pending_fees)
+        Ok(gross_assets - pending_fees)
+    }
+
+    pub fn compute_total_assets(&self, invested_total: &Fraction) -> Result<Fraction> {
+        Ok(Fraction::from(self.token_available)
+            + invested_total
+            + Fraction::from(self.non_klend_reported_value)
+            + Fraction::from(self.offchain_nav))
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -611,5 +642,28 @@ impl Default for ReserveWhitelistEntry {
             whitelist_invest: 0,
             padding: [0; 62],
         }
+    }
+}
+
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrategyType {
+    KLend,
+    ReportedValue,
+}
+
+#[account]
+pub struct NonKlendStrategyState {
+    pub vault: Pubkey,
+    pub strategy_type: StrategyType,
+    pub allocation: u64,
+    pub last_reported_value: u64,
+    pub bump: u8,
+    pub padding: [u8; 119],
+}
+
+impl NonKlendStrategyState {
+    pub fn space() -> usize {
+        8 + 32 + 1 + 8 + 8 + 1 + 119
     }
 }

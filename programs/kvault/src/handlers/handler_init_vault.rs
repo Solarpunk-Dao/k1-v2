@@ -19,6 +19,7 @@ pub fn process(ctx: Context<InitVault>) -> Result<()> {
 
     vault.vault_admin_authority = ctx.accounts.admin_authority.key();
     vault.allocation_admin = ctx.accounts.admin_authority.key();
+    vault.fee_recipient = ctx.accounts.admin_authority.key();
     vault.token_mint = ctx.accounts.base_token_mint.key();
     vault.token_vault = ctx.accounts.token_vault.key();
     vault.token_program = ctx.accounts.token_program.key();
@@ -27,6 +28,8 @@ pub fn process(ctx: Context<InitVault>) -> Result<()> {
     vault.base_vault_authority_bump = u64::from(ctx.bumps.base_vault_authority);
 
     let clock = &Clock::get()?;
+    vault.period_start_ts = u64::try_from(clock.unix_timestamp).unwrap();
+
     vault_operations::initialize(
         vault,
         ctx.accounts.base_token_mint.decimals,

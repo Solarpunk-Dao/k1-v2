@@ -17,7 +17,7 @@ use super::effects::{
 use crate::{
     kmsg, kmsg_sized,
     operations::vault_operations::common::{get_shares_to_mint, holdings},
-    utils::consts::SECONDS_PER_YEAR,
+    utils::consts::{MAX_WITHDRAW_THROTTLE_BPS, SECONDS_PER_DAY, SECONDS_PER_YEAR},
     xmsg, GlobalConfig, KaminoVaultError, ReserveWhitelistEntry, VaultState, MAX_RESERVES,
 };
 
@@ -152,6 +152,21 @@ where
     require!(
         total_for_user > 0,
         KaminoVaultError::CannotWithdrawZeroLamports
+    );
+
+    let treasury_value = vault.compute_total_assets(&holdings.invested.total)?;
+    let mut redeemed_in_period = vault.redeemed_in_period;
+    if current_timestamp.saturating_sub(vault.period_start_ts) >= SECONDS_PER_DAY {
+        redeemed_in_period = 0;
+        vault.period_start_ts = current_timestamp;
+    }
+
+    let max_redeem_in_period = treasury_value
+        .mul_int_ratio(MAX_WITHDRAW_THROTTLE_BPS, 10_000u64)
+        .to_floor::<u64>();
+    require!(
+        redeemed_in_period.saturating_add(total_for_user) <= max_redeem_in_period,
+        KaminoVaultError::WithdrawThrottleExceeded
     );
 
     // use as withdrawal fee the max of the withdrawal fee lamports and the withdrawal fee bps and lamports between the global config and the vault state
@@ -295,6 +310,7 @@ where
     let net_amount_withdrawn_from_vault =
         theoretical_amount_to_send_to_user_f - Fraction::from(withdrawal_penalty);
     common::update_prev_aum(vault, current_vault_aum - net_amount_withdrawn_from_vault);
+    vault.redeemed_in_period = redeemed_in_period.saturating_add(total_for_user);
 
     Ok(WithdrawEffects {
         shares_to_burn,
@@ -737,7 +753,7 @@ pub mod common {
         T: AnyAccountLoader<'info, Reserve>,
     {
         let (available, invested) = underlying_inventory(vault, reserves_iter, slot)?;
-        let total_sum = Fraction::from(available) + invested.total;
+        let total_sum = vault.compute_total_assets(&invested.total)?;
 
         Ok(Holdings {
             available,

@@ -25,6 +25,11 @@ pub fn process<'info>(ctx: Context<'_, '_, '_, 'info, WithdrawPendingFees<'info>
     );
 
     let vault_state = &mut ctx.accounts.vault_state.load_mut()?;
+    require!(
+        ctx.accounts.vault_admin_authority.key() == vault_state.vault_admin_authority
+            || ctx.accounts.vault_admin_authority.key() == vault_state.fee_recipient,
+        KaminoVaultError::AdminAuthorityIncorrect
+    );
     let reserves_count = vault_state.get_reserves_count();
 
     {
@@ -156,7 +161,6 @@ pub struct WithdrawPendingFees<'info> {
         has_one = token_vault,
         has_one = token_mint,
         has_one = token_program,
-        has_one = vault_admin_authority
     )]
     pub vault_state: AccountLoader<'info, VaultState>,
 
