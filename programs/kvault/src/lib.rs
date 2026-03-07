@@ -157,6 +157,24 @@ pub mod kamino_vault {
     ) -> Result<()> {
         handler_add_update_whitelisted_reserve::process(ctx, update)
     }
+
+    pub fn init_non_klend_strategy(ctx: Context<InitNonKlendStrategy>) -> Result<()> {
+        handler_non_klend_strategy::init(ctx)
+    }
+
+    pub fn allocate_to_non_klend_strategy(
+        ctx: Context<AllocateToNonKlendStrategy>,
+        amount: u64,
+    ) -> Result<()> {
+        handler_non_klend_strategy::allocate(ctx, amount)
+    }
+
+    pub fn report_non_klend_strategy_value(
+        ctx: Context<ReportNonKlendStrategyValue>,
+        reported_value: u64,
+    ) -> Result<()> {
+        handler_non_klend_strategy::report(ctx, reported_value)
+    }
 }
 
 #[error_code]
@@ -330,6 +348,15 @@ pub enum KaminoVaultError {
 
     #[msg("Invalid bool-like value passed in (should be 0 or 1)")]
     InvalidBoolLikeValue,
+
+    #[msg("Deposits are paused")]
+    DepositsPaused,
+
+    #[msg("Withdrawals are paused")]
+    WithdrawalsPaused,
+
+    #[msg("Withdraw throttle exceeded for current period")]
+    WithdrawThrottleExceeded,
 }
 
 pub type KaminoVaultResult<T = ()> = std::result::Result<T, KaminoVaultError>;

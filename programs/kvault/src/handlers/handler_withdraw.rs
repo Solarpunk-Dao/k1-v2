@@ -191,6 +191,10 @@ pub mod withdraw_utils {
             &mut withdraw_from_available_accounts.vault_state.load_mut()?;
         let global_config = &withdraw_from_available_accounts.global_config.load()?;
         let reserves_count = vault_state.get_reserves_count();
+        require!(
+            !vault_state.withdrawals_are_paused(),
+            KaminoVaultError::WithdrawalsPaused
+        );
 
         // Cache some values for withdraw from available
         let token_vault_before = withdraw_from_available_accounts.token_vault.amount;

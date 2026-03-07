@@ -28,6 +28,10 @@ pub fn process<'info>(
     );
     let vault_state = &mut ctx.accounts.vault_state.load_mut()?;
     let reserves_count = vault_state.get_reserves_count();
+    require!(
+        !vault_state.deposits_are_paused(),
+        KaminoVaultError::DepositsPaused
+    );
 
     {
         // Refresh all reserves

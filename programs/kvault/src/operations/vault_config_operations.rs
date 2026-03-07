@@ -31,6 +31,10 @@ pub enum VaultConfigField {
     WithdrawalPenaltyLamports,
     WithdrawalPenaltyBps,
     FirstLossCapitalFarm,
+    FeeRecipient,
+    PauseDeposits,
+    PauseWithdrawals,
+    OffchainNav,
     AllowAllocationsInWhitelistedReservesOnly,
     AllowInvestInWhitelistedReservesOnly,
 }
@@ -79,7 +83,11 @@ pub fn check_if_signer_allowed_to_update_vault_config(
         | VaultConfigField::UnallocatedWeight
         | VaultConfigField::UnallocatedTokensCap
         | VaultConfigField::WithdrawalPenaltyLamports
-        | VaultConfigField::WithdrawalPenaltyBps => {
+        | VaultConfigField::WithdrawalPenaltyBps
+        | VaultConfigField::FeeRecipient
+        | VaultConfigField::PauseDeposits
+        | VaultConfigField::PauseWithdrawals
+        | VaultConfigField::OffchainNav => {
             // For all other fields, only vault admin is allowed
             require!(is_vault_admin, KaminoVaultError::AdminAuthorityIncorrect);
         }
@@ -191,6 +199,32 @@ pub fn update_vault_config(
             msg!("Prv value is {:?}", vault.first_loss_capital_farm);
             msg!("New value is {:?}", pubkey);
             vault.first_loss_capital_farm = pubkey;
+        }
+        VaultConfigField::FeeRecipient => {
+            let pubkey: Pubkey = BorshDeserialize::try_from_slice(data)?;
+            msg!("Prv value is {:?}", vault.fee_recipient);
+            msg!("New value is {:?}", pubkey);
+            vault.fee_recipient = pubkey;
+        }
+        VaultConfigField::PauseDeposits => {
+            let value: u8 = BorshDeserialize::try_from_slice(data)?;
+            require!(value <= 1, KaminoVaultError::InvalidBoolLikeValue);
+            msg!("Prv value is {:?}", vault.deposits_paused);
+            msg!("New value is {:?}", value);
+            vault.deposits_paused = value;
+        }
+        VaultConfigField::PauseWithdrawals => {
+            let value: u8 = BorshDeserialize::try_from_slice(data)?;
+            require!(value <= 1, KaminoVaultError::InvalidBoolLikeValue);
+            msg!("Prv value is {:?}", vault.withdrawals_paused);
+            msg!("New value is {:?}", value);
+            vault.withdrawals_paused = value;
+        }
+        VaultConfigField::OffchainNav => {
+            let offchain_nav: u64 = BorshDeserialize::try_from_slice(data)?;
+            msg!("Prv value is {:?}", vault.offchain_nav);
+            msg!("New value is {:?}", offchain_nav);
+            vault.offchain_nav = offchain_nav;
         }
         VaultConfigField::AllocationAdmin => {
             let pubkey: Pubkey = BorshDeserialize::try_from_slice(data)?;
