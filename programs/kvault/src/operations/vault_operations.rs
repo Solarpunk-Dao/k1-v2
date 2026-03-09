@@ -5,7 +5,7 @@ use anchor_lang::{err, prelude::*, require, solana_program::clock::Slot, Result}
 use common::{compute_user_total_received_on_withdraw, update_prev_aum, Holdings, Invested};
 use kamino_lending::{
     fraction::Fraction,
-    utils::{AnyAccountLoader, FractionExtra},
+    utils::{AnyAccountLoader, FractionExtra, FULL_BPS},
     Reserve,
 };
 use rust_decimal::prelude::ToPrimitive;
@@ -17,7 +17,7 @@ use super::effects::{
 use crate::{
     kmsg, kmsg_sized,
     operations::vault_operations::common::{get_shares_to_mint, holdings},
-    utils::consts::SECONDS_PER_YEAR,
+    utils::consts::{SECONDS_PER_DAY, SECONDS_PER_YEAR},
     xmsg, GlobalConfig, KaminoVaultError, ReserveWhitelistEntry, VaultState, MAX_RESERVES,
 };
 
@@ -46,6 +46,7 @@ pub fn initialize(
 pub fn deposit<'info, T>(
     vault: &mut VaultState,
     reserves_iter: impl Iterator<Item = T>,
+    non_klend_total: Fraction,
     max_amount: u64,
     current_slot: Slot,
     current_timestamp: u64,
@@ -70,8 +71,8 @@ where
     );
     kmsg!("shares_issued before deposit {}", vault.shares_issued);
 
-    charge_fees(vault, &holdings.invested, current_timestamp)?;
-    let current_vault_aum = vault.compute_aum(&holdings.invested.total)?;
+    charge_fees(vault, &holdings.invested, non_klend_total, current_timestamp)?;
+    let current_vault_aum = compute_extended_aum(vault, &holdings.invested.total, non_klend_total)?;
 
     let shares_to_mint = get_shares_to_mint(
         current_vault_aum,
@@ -116,6 +117,7 @@ pub fn withdraw<'info, T>(
     reserve_address_to_withdraw_from: Option<&Pubkey>,
     reserve_state_to_withdraw_from: Option<&Reserve>,
     reserves_iter: impl Iterator<Item = T>,
+    non_klend_total: Fraction,
     current_timestamp: u64,
     current_slot: Slot,
     number_of_shares: u64,
@@ -132,10 +134,10 @@ where
     // Get total amounts
     let holdings = holdings(vault, reserves_iter, current_slot)?;
 
-    charge_fees(vault, &holdings.invested, current_timestamp)?;
+    charge_fees(vault, &holdings.invested, non_klend_total, current_timestamp)?;
 
     // user is entitled to his corresponding ratio of the total - pending fees
-    let current_vault_aum = vault.compute_aum(&holdings.invested.total)?;
+    let current_vault_aum = compute_extended_aum(vault, &holdings.invested.total, non_klend_total)?;
 
     require!(
         current_vault_aum > Fraction::ZERO,
@@ -172,6 +174,8 @@ where
         KaminoVaultError::WithdrawAmountLessThanWithdrawalPenalty
     );
     let total_for_user = total_for_user - withdrawal_penalty;
+
+    apply_withdraw_throttle(vault, total_for_user, current_vault_aum, current_timestamp)?;
 
     // Calculate how much the user is allowed to withdraw given a max combo of
     // available + reserve
@@ -311,6 +315,7 @@ pub fn withdraw_pending_fees<'info, T>(
     reserve_address_to_withdraw_from: &Pubkey,
     reserve_state_to_withdraw_from: &Reserve,
     reserves_iter: impl Iterator<Item = T>,
+    non_klend_total: Fraction,
     current_slot: Slot,
     current_timestamp: u64,
 ) -> Result<WithdrawPendingFeesEffects>
@@ -331,7 +336,7 @@ where
         total_sum.to_display()
     );
 
-    charge_fees(vault, &invested, current_timestamp)?;
+    charge_fees(vault, &invested, non_klend_total, current_timestamp)?;
 
     let total_fees = Fraction::from_bits(vault.pending_fees_sf);
 
@@ -393,6 +398,7 @@ where
 pub fn give_up_pending_fee<'info, T>(
     vault: &mut VaultState,
     reserves_iter: impl Iterator<Item = T>,
+    non_klend_total: Fraction,
     current_slot: Slot,
     current_timestamp: u64,
     max_amount_to_give_up: u64,
@@ -404,7 +410,7 @@ where
     msg!("holdings {:?}", holdings);
     let invested = &holdings.invested;
 
-    charge_fees(vault, invested, current_timestamp)?;
+    charge_fees(vault, invested, non_klend_total, current_timestamp)?;
     let amount = Fraction::from(max_amount_to_give_up);
     let pending_fees = vault.get_pending_fees();
     let amount_to_give_up = amount.min(pending_fees);
@@ -440,6 +446,7 @@ pub fn invest<'info, T>(
     reserve_address: &Pubkey,
     current_slot: Slot,
     current_timestamp: u64,
+    non_klend_total: Fraction,
     reserve_whitelist_entry: Option<&ReserveWhitelistEntry>,
 ) -> Result<InvestEffects>
 where
@@ -454,7 +461,7 @@ where
     );
     let invested = holdings.invested;
 
-    charge_fees(vault, &invested, current_timestamp)?;
+    charge_fees(vault, &invested, non_klend_total, current_timestamp)?;
 
     vault.refresh_target_allocations(&invested)?;
 
@@ -567,7 +574,12 @@ where
     })
 }
 
-pub fn charge_fees(vault: &mut VaultState, invested: &Invested, timestamp: u64) -> Result<()> {
+pub fn charge_fees(
+    vault: &mut VaultState,
+    invested: &Invested,
+    non_klend_total: Fraction,
+    timestamp: u64,
+) -> Result<()> {
     if vault.last_fee_charge_timestamp == 0 {
         vault.last_fee_charge_timestamp = timestamp;
         return Ok(());
@@ -575,7 +587,8 @@ pub fn charge_fees(vault: &mut VaultState, invested: &Invested, timestamp: u64) 
 
     let seconds_passed = timestamp.saturating_sub(vault.last_fee_charge_timestamp);
 
-    let new_aum = vault.compute_aum(&invested.total).unwrap_or(Fraction::ZERO);
+    let new_aum = compute_extended_aum(vault, &invested.total, non_klend_total)
+        .unwrap_or(Fraction::ZERO);
     let prev_aum = vault.get_prev_aum();
 
     // Use our new kmsg! macro which is cleaner and more efficient
@@ -631,6 +644,45 @@ pub fn charge_fees(vault: &mut VaultState, invested: &Invested, timestamp: u64) 
     vault.set_pending_fees(pending_fees);
     update_prev_aum(vault, new_aum - new_fees);
     vault.last_fee_charge_timestamp = timestamp;
+
+    Ok(())
+}
+
+fn compute_extended_aum(
+    vault: &VaultState,
+    invested_total: &Fraction,
+    non_klend_total: Fraction,
+) -> Result<Fraction> {
+    vault.compute_aum(&(invested_total + non_klend_total))
+}
+
+fn apply_withdraw_throttle(
+    vault: &mut VaultState,
+    withdrawal_amount: u64,
+    current_vault_aum: Fraction,
+    current_timestamp: u64,
+) -> Result<()> {
+    let period_start = u64::from(vault.get_period_start_ts());
+    let mut redeemed_in_period = vault.get_redeemed_in_period();
+
+    if period_start == 0 || current_timestamp.saturating_sub(period_start) >= SECONDS_PER_DAY {
+        vault.set_period_start_ts(current_timestamp as u32);
+        redeemed_in_period = 0;
+    }
+
+    let throttle_bps = vault.get_effective_withdraw_throttle_bps();
+
+    let max_redeemable_in_period = current_vault_aum
+        .full_mul_int_ratio(u64::from(throttle_bps), FULL_BPS)
+        .to_floor::<u64>();
+
+    let new_redeemed = redeemed_in_period.saturating_add(withdrawal_amount);
+    require!(
+        new_redeemed <= max_redeemable_in_period,
+        KaminoVaultError::WithdrawThrottleExceeded
+    );
+
+    vault.set_redeemed_in_period(new_redeemed);
 
     Ok(())
 }
@@ -980,5 +1032,42 @@ pub mod string_utils {
         array[..len].copy_from_slice(&slice[..len]);
 
         array
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_withdraw_throttle_allows_within_limit() {
+        let mut vault = VaultState::default();
+        let aum = Fraction::from(1_000_u64);
+
+        apply_withdraw_throttle(&mut vault, 30, aum, 100).unwrap();
+
+        assert_eq!(vault.get_period_start_ts(), 100);
+        assert_eq!(vault.get_redeemed_in_period(), 30);
+    }
+
+    #[test]
+    fn test_withdraw_throttle_rejects_when_exceeded() {
+        let mut vault = VaultState::default();
+        let aum = Fraction::from(1_000_u64); // default throttle is 5% => 50
+
+        let err = apply_withdraw_throttle(&mut vault, 51, aum, 100).unwrap_err();
+        assert_eq!(err, error!(KaminoVaultError::WithdrawThrottleExceeded));
+    }
+
+    #[test]
+    fn test_withdraw_throttle_resets_period_after_one_day() {
+        let mut vault = VaultState::default();
+        let aum = Fraction::from(1_000_u64);
+
+        apply_withdraw_throttle(&mut vault, 40, aum, 100).unwrap();
+        apply_withdraw_throttle(&mut vault, 40, aum, 100 + SECONDS_PER_DAY + 1).unwrap();
+
+        assert_eq!(vault.get_period_start_ts(), (100 + SECONDS_PER_DAY + 1) as u32);
+        assert_eq!(vault.get_redeemed_in_period(), 40);
     }
 }

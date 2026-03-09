@@ -4,6 +4,7 @@ use kamino_lending::{utils::FatAccountLoader, Reserve};
 use crate::{
     operations::{
         klend_operations,
+        non_klend_strategy_operations,
         vault_config_operations::{
             self, check_if_signer_allowed_to_update_vault_config, VaultConfigField,
         },
@@ -47,9 +48,14 @@ pub fn process<'info>(
     let holdings = holdings(vault, reserves_iter, Clock::get()?.slot)?;
     msg!("holdings {:?}", holdings);
     // charge fees because after this the fee structure can be different
+    let non_klend_total = non_klend_strategy_operations::aggregate_non_klend_value_for_vault(
+        &ctx.accounts.vault_state.key(),
+        ctx.remaining_accounts,
+    );
     vault_operations::charge_fees(
         vault,
         &holdings.invested,
+        non_klend_total,
         Clock::get()?.unix_timestamp.try_into().unwrap(),
     )?;
 

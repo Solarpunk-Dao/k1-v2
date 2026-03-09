@@ -11,6 +11,7 @@ use crate::{
     operations::{
         effects::WithdrawPendingFeesEffects,
         klend_operations,
+        non_klend_strategy_operations,
         vault_checks::{post_transfer_withdraw_pending_fees_balance_checks, VaultAndUserBalances},
         vault_operations,
     },
@@ -59,11 +60,16 @@ pub fn process<'info>(ctx: Context<'_, '_, '_, 'info, WithdrawPendingFees<'info>
     );
 
     let withdraw_pending_fees_effects = {
+        let non_klend_total = non_klend_strategy_operations::aggregate_non_klend_value_for_vault(
+            &ctx.accounts.vault_state.key(),
+            ctx.remaining_accounts,
+        );
         vault_operations::withdraw_pending_fees(
             vault_state,
             reserve_address,
             &reserve,
             reserves_iter,
+            non_klend_total,
             Clock::get()?.slot,
             Clock::get()?.unix_timestamp.try_into().unwrap(),
         )?

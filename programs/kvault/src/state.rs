@@ -1,12 +1,13 @@
 use anchor_lang::prelude::*;
-use kamino_lending::{fraction::Fraction, utils::FractionExtra};
+use kamino_lending::{fraction::Fraction, utils::{FractionExtra, FULL_BPS}};
 
 use crate::{
     operations::vault_operations::common::Invested,
     utils::{
         consts::{
             GLOBAL_CONFIG_SIZE, MAX_WITHDRAWAL_PENALTY_BPS, MAX_WITHDRAWAL_PENALTY_LAMPORTS,
-            RESERVE_WHITELIST_ENTRY_SIZE, VAULT_ALLOCATION_SIZE, VAULT_STATE_SIZE,
+            NON_KLEND_STRATEGY_STATE_SIZE, RESERVE_WHITELIST_ENTRY_SIZE, VAULT_ALLOCATION_SIZE,
+            VAULT_STATE_SIZE,
         },
         global_config::UpdateGlobalConfigMode,
     },
@@ -169,6 +170,15 @@ impl Default for VaultState {
 }
 
 impl VaultState {
+    // Throttle state is packed into padding_4 to preserve zero-copy account layout.
+    // Layout (little-endian):
+    // [0..8)   redeemed_in_period: u64
+    // [8..12)  period_start_ts: u32
+    // [12..14) withdraw_throttle_bps: u16
+    const THROTTLE_REDEEMED_OFFSET: usize = 0;
+    const THROTTLE_PERIOD_START_OFFSET: usize = 8;
+    const THROTTLE_BPS_OFFSET: usize = 12;
+
     pub fn get_pending_fees(&self) -> Fraction {
         Fraction::from_bits(self.pending_fees_sf)
     }
@@ -235,6 +245,53 @@ impl VaultState {
         self.allow_invest_in_whitelisted_reserves_only == 1
     }
 
+    pub fn get_redeemed_in_period(&self) -> u64 {
+        let mut bytes = [0u8; 8];
+        bytes.copy_from_slice(
+            &self.padding_4
+                [Self::THROTTLE_REDEEMED_OFFSET..Self::THROTTLE_REDEEMED_OFFSET + 8],
+        );
+        u64::from_le_bytes(bytes)
+    }
+
+    pub fn set_redeemed_in_period(&mut self, value: u64) {
+        self.padding_4[Self::THROTTLE_REDEEMED_OFFSET..Self::THROTTLE_REDEEMED_OFFSET + 8]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn get_period_start_ts(&self) -> u32 {
+        let mut bytes = [0u8; 4];
+        bytes.copy_from_slice(
+            &self.padding_4
+                [Self::THROTTLE_PERIOD_START_OFFSET..Self::THROTTLE_PERIOD_START_OFFSET + 4],
+        );
+        u32::from_le_bytes(bytes)
+    }
+
+    pub fn set_period_start_ts(&mut self, value: u32) {
+        self.padding_4
+            [Self::THROTTLE_PERIOD_START_OFFSET..Self::THROTTLE_PERIOD_START_OFFSET + 4]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn get_withdraw_throttle_bps(&self) -> u16 {
+        let mut bytes = [0u8; 2];
+        bytes.copy_from_slice(
+            &self.padding_4[Self::THROTTLE_BPS_OFFSET..Self::THROTTLE_BPS_OFFSET + 2],
+        );
+        u16::from_le_bytes(bytes)
+    }
+
+    pub fn set_withdraw_throttle_bps(&mut self, value: u16) {
+        self.padding_4[Self::THROTTLE_BPS_OFFSET..Self::THROTTLE_BPS_OFFSET + 2]
+            .copy_from_slice(&value.to_le_bytes());
+    }
+
+    pub fn get_effective_withdraw_throttle_bps(&self) -> u16 {
+        let raw = self.get_withdraw_throttle_bps();
+        if raw == 0 { 500 } else { raw }
+    }
+
     pub fn compute_aum(&self, invested_total: &Fraction) -> Result<Fraction> {
         // if the vault only has pending fees, it should not be possible to withdraw
         let pending_fees = self.get_pending_fees();
@@ -269,6 +326,10 @@ impl VaultState {
 
         if self.token_vault == Pubkey::default() {
             return err!(KaminoVaultError::TokenVaultIncorrect);
+        }
+
+        if self.get_effective_withdraw_throttle_bps() > FULL_BPS {
+            return err!(KaminoVaultError::WithdrawThrottleBpsTooLarge);
         }
 
         if self.shares_mint == Pubkey::default() {
@@ -611,5 +672,127 @@ impl Default for ReserveWhitelistEntry {
             whitelist_invest: 0,
             padding: [0; 62],
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, AnchorSerialize, AnchorDeserialize)]
+#[repr(u8)]
+pub enum StrategyType {
+    KLend = 0,
+    ReportedValue = 1,
+}
+
+impl TryFrom<u8> for StrategyType {
+    type Error = ProgramError;
+
+    fn try_from(value: u8) -> std::result::Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::KLend),
+            1 => Ok(Self::ReportedValue),
+            _ => Err(ProgramError::InvalidInstructionData),
+        }
+    }
+}
+
+static_assertions::const_assert_eq!(
+    NON_KLEND_STRATEGY_STATE_SIZE,
+    std::mem::size_of::<NonKlendStrategyState>()
+);
+static_assertions::const_assert_eq!(0, std::mem::size_of::<NonKlendStrategyState>() % 8);
+
+#[account]
+pub struct NonKlendStrategyState {
+    pub vault: Pubkey,
+    pub strategy_id: Pubkey,
+    pub escrow_token_account: Pubkey,
+    pub reporter_authority: Pubkey,
+    pub strategy_type: u8,
+    pub enabled: u8,
+    pub _padding_0: [u8; 6],
+    pub target_allocation_weight: u64,
+    pub allocation_cap: u64,
+    pub last_reported_value_sf: u128,
+    pub last_report_ts: u64,
+    pub padding: [u8; 80],
+}
+
+impl Default for NonKlendStrategyState {
+    fn default() -> Self {
+        Self {
+            vault: Pubkey::default(),
+            strategy_id: Pubkey::default(),
+            escrow_token_account: Pubkey::default(),
+            reporter_authority: Pubkey::default(),
+            strategy_type: StrategyType::ReportedValue as u8,
+            enabled: 1,
+            _padding_0: [0; 6],
+            target_allocation_weight: 0,
+            allocation_cap: u64::MAX,
+            last_reported_value_sf: 0,
+            last_report_ts: 0,
+            padding: [0; 80],
+        }
+    }
+}
+
+impl NonKlendStrategyState {
+    pub fn strategy_type(&self) -> Result<StrategyType> {
+        StrategyType::try_from(self.strategy_type)
+            .map_err(|_| error!(KaminoVaultError::InvalidNonKlendStrategyType))
+    }
+
+    pub fn get_last_reported_value(&self) -> Fraction {
+        Fraction::from_bits(self.last_reported_value_sf)
+    }
+
+    pub fn set_last_reported_value(&mut self, value: Fraction) {
+        self.last_reported_value_sf = value.to_bits();
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        require!(
+            self.reporter_authority != Pubkey::default(),
+            KaminoVaultError::InvalidNonKlendStrategyReporter
+        );
+        self.strategy_type()?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_withdraw_throttle_padding_roundtrip() {
+        let mut vault = VaultState::default();
+
+        vault.set_redeemed_in_period(123);
+        vault.set_period_start_ts(456);
+        vault.set_withdraw_throttle_bps(789);
+
+        assert_eq!(vault.get_redeemed_in_period(), 123);
+        assert_eq!(vault.get_period_start_ts(), 456);
+        assert_eq!(vault.get_withdraw_throttle_bps(), 789);
+    }
+
+    #[test]
+    fn test_withdraw_throttle_default_bps() {
+        let vault = VaultState::default();
+        assert_eq!(vault.get_effective_withdraw_throttle_bps(), 500);
+    }
+
+    #[test]
+    fn test_non_klend_strategy_validation() {
+        let mut strategy = NonKlendStrategyState::default();
+        strategy.reporter_authority = Pubkey::new_unique();
+        strategy.strategy_type = StrategyType::ReportedValue as u8;
+        strategy.validate().unwrap();
+
+        strategy.strategy_type = 99;
+        assert_eq!(
+            strategy.validate().unwrap_err(),
+            error!(KaminoVaultError::InvalidNonKlendStrategyType)
+        );
     }
 }
