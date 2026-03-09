@@ -7,7 +7,9 @@ use kamino_lending::{utils::FatAccountLoader, Reserve};
 
 use crate::{
     events::{DepositResultEvent, DepositUserAtaBalanceEvent},
-    operations::{effects::DepositEffects, klend_operations, vault_operations},
+    operations::{
+        effects::DepositEffects, klend_operations, non_klend_strategy_operations, vault_operations,
+    },
     utils::{
         cpi_mem::CpiMemoryLender,
         token_ops::{self, shares, tokens::UserTransferAccounts},
@@ -51,6 +53,11 @@ pub fn process<'info>(
         .take(reserves_count)
         .map(|account_info| FatAccountLoader::<Reserve>::try_from(account_info).unwrap());
 
+    let non_klend_total = non_klend_strategy_operations::aggregate_non_klend_value_for_vault(
+        &ctx.accounts.vault_state.key(),
+        ctx.remaining_accounts,
+    );
+
     let DepositEffects {
         shares_to_mint,
         token_to_deposit,
@@ -58,6 +65,7 @@ pub fn process<'info>(
     } = vault_operations::deposit(
         vault_state,
         reserves_iter,
+        non_klend_total,
         max_amount,
         Clock::get()?.slot,
         Clock::get()?.unix_timestamp.try_into().unwrap(),

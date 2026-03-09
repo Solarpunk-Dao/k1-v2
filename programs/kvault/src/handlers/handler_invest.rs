@@ -18,6 +18,7 @@ use crate::{
     operations::{
         effects::{InvestEffects, InvestingDirection},
         klend_operations,
+        non_klend_strategy_operations,
         vault_checks::{post_transfer_invest_checks, VaultBalances},
         vault_operations::{
             self,
@@ -80,6 +81,10 @@ pub fn process<'info>(ctx: Context<'_, '_, '_, 'info, Invest<'info>>) -> Result<
         reserve_address,
         current_slot,
         current_timestamp,
+        non_klend_strategy_operations::aggregate_non_klend_value_for_vault(
+            &ctx.accounts.vault_state.key(),
+            ctx.remaining_accounts,
+        ),
         ctx.accounts
             .reserve_whitelist_entry
             .as_ref()

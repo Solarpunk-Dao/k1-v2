@@ -4,6 +4,7 @@ use anchor_spl::{
     token_interface::{Mint, TokenAccount, TokenInterface},
 };
 use kamino_lending::{utils::FatAccountLoader, Reserve};
+use kamino_lending::fraction::Fraction;
 
 use crate::{
     operations::{effects::DepositEffects, vault_operations},
@@ -47,6 +48,7 @@ pub fn process(ctx: Context<InitVault>) -> Result<()> {
     } = vault_operations::deposit(
         vault,
         reserves_iter,
+        Fraction::ZERO,
         INITIAL_DEPOSIT_AMOUNT,
         clock.slot,
         clock.unix_timestamp.try_into().unwrap(),

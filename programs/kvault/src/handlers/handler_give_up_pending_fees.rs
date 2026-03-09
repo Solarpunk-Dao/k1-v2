@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 use kamino_lending::{utils::FatAccountLoader, Reserve};
 
 use crate::{
-    operations::{klend_operations, vault_operations},
+    operations::{klend_operations, non_klend_strategy_operations, vault_operations},
     utils::cpi_mem::CpiMemoryLender,
     VaultState,
 };
@@ -38,6 +38,10 @@ pub fn process<'info>(
     vault_operations::give_up_pending_fee(
         vault_state,
         reserves_iter,
+        non_klend_strategy_operations::aggregate_non_klend_value_for_vault(
+            &ctx.accounts.vault_state.key(),
+            ctx.remaining_accounts,
+        ),
         clock.slot,
         u64::try_from(clock.unix_timestamp).unwrap(),
         max_amount_to_give_up,

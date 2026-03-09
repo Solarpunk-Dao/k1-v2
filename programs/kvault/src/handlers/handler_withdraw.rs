@@ -11,6 +11,7 @@ use crate::{
     operations::{
         effects::WithdrawEffects,
         klend_operations,
+        non_klend_strategy_operations,
         vault_checks::{post_transfer_withdraw_balance_checks, VaultAndUserBalances},
         vault_operations,
     },
@@ -250,12 +251,18 @@ pub mod withdraw_utils {
                 (None, None, None)
             };
 
+        let non_klend_total = non_klend_strategy_operations::aggregate_non_klend_value_for_vault(
+            &withdraw_from_available_accounts.vault_state.key(),
+            remaining_accounts,
+        );
+
         let withdraw_effects = vault_operations::withdraw(
             vault_state,
             global_config,
             reserve_address_to_withdraw_from,
             reserve_state_to_withdraw_from.as_deref(),
             reserves_iter,
+            non_klend_total,
             Clock::get()?.unix_timestamp.try_into().unwrap(),
             Clock::get()?.slot,
             shares_amount,

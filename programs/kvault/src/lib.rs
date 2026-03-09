@@ -157,6 +157,25 @@ pub mod kamino_vault {
     ) -> Result<()> {
         handler_add_update_whitelisted_reserve::process(ctx, update)
     }
+
+    pub fn init_non_klend_strategy(
+        ctx: Context<InitNonKlendStrategy>,
+        strategy_id: Pubkey,
+    ) -> Result<()> {
+        handler_init_non_klend_strategy::process(ctx, strategy_id)
+    }
+
+    pub fn report_non_klend_strategy_value(
+        ctx: Context<ReportNonKlendStrategyValue>,
+        strategy_id: Pubkey,
+        last_reported_value_sf: u128,
+    ) -> Result<()> {
+        handler_report_non_klend_strategy_value::process(
+            ctx,
+            strategy_id,
+            last_reported_value_sf,
+        )
+    }
 }
 
 #[error_code]
@@ -330,7 +349,21 @@ pub enum KaminoVaultError {
 
     #[msg("Invalid bool-like value passed in (should be 0 or 1)")]
     InvalidBoolLikeValue,
+
+    #[msg("Invalid non-KLend strategy type")]
+    InvalidNonKlendStrategyType,
+
+    #[msg("Invalid non-KLend strategy reporter")]
+    InvalidNonKlendStrategyReporter,
+
+    #[msg("Non-KLend strategy is disabled")]
+    NonKlendStrategyDisabled,
+
+    #[msg("Withdraw exceeds throttle limit for current period")]
+    WithdrawThrottleExceeded,
+
+    #[msg("Withdraw throttle BPS is greater than 10000")]
+    WithdrawThrottleBpsTooLarge,
 }
 
 pub type KaminoVaultResult<T = ()> = std::result::Result<T, KaminoVaultError>;
-

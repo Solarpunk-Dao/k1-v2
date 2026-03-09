@@ -6,11 +6,13 @@ pub const METADATA_SEEDS: &[u8; 8] = b"metadata";
 pub const EVENT_AUTHORITY: &[u8] = b"__event_authority";
 pub const GLOBAL_CONFIG_STATE_SEEDS: &[u8] = b"global_config";
 pub const WHITELISTED_RESERVES_SEED: &[u8] = b"whitelisted_reserves";
+pub const NON_KLEND_STRATEGY_SEED: &[u8] = b"non_klend_strategy";
 
 pub const VAULT_STATE_SIZE: usize = 62544;
 pub const VAULT_ALLOCATION_SIZE: usize = 2160;
 pub const GLOBAL_CONFIG_SIZE: usize = 1024;
 pub const RESERVE_WHITELIST_ENTRY_SIZE: usize = 128;
+pub const NON_KLEND_STRATEGY_STATE_SIZE: usize = 256;
 
 /// Max value for management fee that a vault manager can set
 pub const MAX_MGMT_FEE_BPS: u64 = 1000;
